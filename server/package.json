@@ -23,6 +23,7 @@
     "dotenv": "^17.2.1",
     "ethers": "^6.15.0",
     "express": "^5.1.0",
+    "google-search-results-nodejs": "^2.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.16.5",
     "mongoose-aggregate-paginate-v2": "^1.1.4",
