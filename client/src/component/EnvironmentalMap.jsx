@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 
-// The getAqiInfo and createAqiIcon helper functions remain the same
+// --- Helper Functions (No changes here) ---
 const getAqiInfo = (aqi) => {
     if (aqi === '-' || aqi === undefined) return { status: 'N/A', color: '#9CA3AF' };
     const val = parseInt(aqi);
@@ -20,93 +20,98 @@ const createAqiIcon = (aqi) => {
     return L.divIcon({ html: iconHtml, className: 'bg-transparent border-0', iconSize: [40, 40], iconAnchor: [20, 20] });
 };
 
-// We will fetch data for these specific locations
-const locationsToFetch = ['mumbai', 'navi-mumbai', 'thane', 'bandra'];
+// --- ZoneLayer and MapClickHandler components remain the same ---
+const ZoneLayer = ({ selectedStation }) => {
+    const map = useMap();
+    useEffect(() => {
+        if (!selectedStation) return;
+        const aqiInfo = getAqiInfo(selectedStation.aqi);
+        const zone = L.circle([selectedStation.lat, selectedStation.lon], {
+            radius: 25000,
+            color: aqiInfo.color,
+            fillColor: aqiInfo.color,
+            fillOpacity: 0.3,
+            weight: 1,
+        }).addTo(map);
+        return () => { map.removeLayer(zone); };
+    }, [selectedStation, map]);
+    return null;
+};
 
-const EnvironmentalMap = () => {
-    const [stations, setStations] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+const MapClickHandler = ({ onDeselect }) => {
+    useMapEvents({ click() { onDeselect(); } });
+    return null;
+};
+
+// --- A more robust component to control the map's view and bounds ---
+const MapController = ({ center, zoom }) => {
+    const map = useMap();
 
     useEffect(() => {
-        const fetchAllStationData = async () => {
-            const apiKey = import.meta.env.VITE_AQI_API_KEY;
+        // This ensures that when the center or zoom props change, the map flies smoothly to the new view.
+        // This fixes the sequential search issue.
+        map.flyTo(center, zoom, {
+            animate: true,
+            duration: 1.5
+        });
+    }, [center, zoom, map]);
 
-            // Create an array of fetch promises, one for each location
-            const fetchPromises = locationsToFetch.map(city =>
-                fetch(`https://api.waqi.info/feed/${city}/?token=${apiKey}`)
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error(`Failed to fetch data for ${city}`);
-                        }
-                        return response.json();
-                    })
-            );
+    return null;
+};
 
-            try {
-                // Wait for all promises to settle (either succeed or fail)
-                const results = await Promise.allSettled(fetchPromises);
-                
-                const validStations = results
-                    // Filter out any requests that failed
-                    .filter(result => result.status === 'fulfilled' && result.value.status === 'ok')
-                    // Map the successful results to the format our map needs
-                    .map(result => {
-                        const stationData = result.value.data;
-                        return {
-                            uid: stationData.idx,
-                            lat: stationData.city.geo[0],
-                            lon: stationData.city.geo[1],
-                            aqi: stationData.aqi,
-                            station: {
-                                name: stationData.city.name,
-                                time: stationData.time.s,
-                            }
-                        };
-                    });
-                
-                setStations(validStations);
 
-            } catch (error) {
-                console.error("An error occurred while fetching station data:", error);
-            } finally {
-                setIsLoading(false);
-            }
-        };
+const EnvironmentalMap = ({ markers, isLoading, center, zoom }) => {
+    const [selectedStation, setSelectedStation] = useState(null);
 
-        fetchAllStationData();
-    }, []);
+    // Define the geographical bounds for India
+    const indiaBounds = [
+        [5.9, 68.1], // South-West corner
+        [35.5, 97.4]  // North-East corner
+    ];
 
     if (isLoading) {
-        return <div className="bg-white p-6 rounded-xl shadow-md text-center">Loading Map & Environmental Data...</div>;
+        return <div className="bg-white p-6 rounded-xl shadow-md text-center h-[600px] flex items-center justify-center">Loading Map & Environmental Data...</div>;
     }
 
     return (
-        <div className="bg-white p-2 rounded-xl shadow-md h-[600px]">
-            <MapContainer center={[19.0760, 72.8777]} zoom={10} scrollWheelZoom={true} style={{ height: '100%', width: '100%', borderRadius: '10px' }}>
+        <div className="bg-white p-2 rounded-xl shadow-md h-[600px] relative">
+            <MapContainer 
+                center={center} 
+                zoom={zoom} 
+                scrollWheelZoom={true} // This enables touchpad zoom
+                style={{ height: '100%', width: '100%', borderRadius: '10px' }}
+                maxBounds={indiaBounds} // This locks the map view to India
+                minZoom={4} // Prevents zooming out too far
+            >
+                <MapController center={center} zoom={zoom} />
                 <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
-                {stations.map(station => (
-                    <Marker
-                        key={station.uid}
-                        position={[station.lat, station.lon]}
-                        icon={createAqiIcon(station.aqi)}
+                
+                {markers.map(marker => (
+                    <Marker 
+                        key={marker.uid} 
+                        position={[marker.lat, marker.lon]} 
+                        icon={createAqiIcon(marker.aqi)}
+                        eventHandlers={{
+                            click: (e) => {
+                                L.DomEvent.stopPropagation(e);
+                                setSelectedStation(marker);
+                            },
+                        }}
                     >
                         <Popup>
-                           {/* The LocationPopup component can be used here if you have it */}
-                            <div className="font-sans">
-                                <h3 className="font-bold text-base mb-1">{station.station.name}</h3>
-                                <p className="text-sm">
-                                    Air Quality Index (AQI): <span className="font-bold" style={{color: getAqiInfo(station.aqi).color}}>{station.aqi}</span>
-                                </p>
-                                <p className="text-xs text-gray-500 mt-2">
-                                    Last updated: {new Date(station.station.time).toLocaleString()}
-                                </p>
-                            </div>
+                           <div className="font-sans">
+                                <h3 className="font-bold text-base mb-1">{marker.name}</h3>
+                                <p className="text-sm">AQI: <span className="font-bold" style={{color: getAqiInfo(marker.aqi).color}}>{marker.aqi}</span></p>
+                           </div>
                         </Popup>
                     </Marker>
                 ))}
+
+                <ZoneLayer selectedStation={selectedStation} />
+                <MapClickHandler onDeselect={() => setSelectedStation(null)} />
             </MapContainer>
         </div>
     );
